@@ -1,0 +1,115 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ConsentStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+
+  @@map("consent_status")
+}
+
+enum TransactionStatus {
+  PENDING
+  BOOKED
+
+  @@map("transaction_status")
+}
+
+enum SyncRunStatus {
+  RUNNING
+  SUCCEEDED
+  RATE_LIMITED
+  FAILED
+
+  @@map("sync_run_status")
+}
+
+model Consent {
+  id                String        @id @default(uuid()) @db.Uuid
+  customerId        String        @map("customer_id") @db.Uuid
+  institutionId     String        @map("institution_id")
+  externalConsentId String        @map("external_consent_id")
+  status            ConsentStatus
+  expiresAt         DateTime      @map("expires_at") @db.Timestamptz(3)
+  lastSyncedAt      DateTime?     @map("last_synced_at") @db.Timestamptz(3)
+  syncLeaseOwner    String?       @map("sync_lease_owner")
+  syncLeaseUntil    DateTime?     @map("sync_lease_until") @db.Timestamptz(3)
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  accounts Account[]
+  syncRuns SyncRun[]
+
+  @@unique([institutionId, externalConsentId])
+  @@index([customerId])
+  @@map("consents")
+}
+
+model Account {
+  id                String   @id @default(uuid()) @db.Uuid
+  consentId         String   @map("consent_id") @db.Uuid
+  customerId        String   @map("customer_id") @db.Uuid
+  institutionId     String   @map("institution_id")
+  externalAccountId String   @map("external_account_id")
+  type              String
+  currency          String   @db.Char(3)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  consent      Consent       @relation(fields: [consentId], references: [id])
+  transactions Transaction[]
+
+  @@unique([institutionId, externalAccountId])
+  @@index([consentId])
+  @@map("accounts")
+}
+
+model Transaction {
+  id                    String            @id @default(uuid()) @db.Uuid
+  accountId             String            @map("account_id") @db.Uuid
+  customerId            String            @map("customer_id") @db.Uuid
+  externalTransactionId String            @map("external_transaction_id")
+  bookedAt              DateTime          @map("booked_at") @db.Timestamptz(3)
+  amount                Decimal           @db.Decimal(19, 4)
+  currency              String            @db.Char(3)
+  description           String
+  status                TransactionStatus
+  contentHash           String            @map("content_hash") @db.Char(64)
+  createdAt             DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime          @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@unique([accountId, externalTransactionId])
+  @@index([customerId, bookedAt(sort: Desc), id(sort: Desc)])
+  @@index([accountId, bookedAt(sort: Desc), id(sort: Desc)])
+  @@map("transactions")
+}
+
+model SyncRun {
+  id                   String        @id @default(uuid()) @db.Uuid
+  consentId            String        @map("consent_id") @db.Uuid
+  correlationId        String        @map("correlation_id")
+  status               SyncRunStatus
+  checkpoint           Json?
+  attempt              Int           @default(1)
+  pagesFetched         Int           @default(0) @map("pages_fetched")
+  transactionsUpserted Int           @default(0) @map("transactions_upserted")
+  error                String?
+  startedAt            DateTime      @default(now()) @map("started_at") @db.Timestamptz(3)
+  finishedAt           DateTime?     @map("finished_at") @db.Timestamptz(3)
+
+  consent Consent @relation(fields: [consentId], references: [id])
+
+  @@index([consentId, startedAt(sort: Desc)])
+  @@index([status, startedAt])
+  @@map("sync_runs")
+}
